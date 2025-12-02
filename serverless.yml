@@ -1,4 +1,4 @@
-service: aws-node-express-api
+service: time-capsule-api
 
 frameworkVersion: '4'
 
