@@ -9,6 +9,7 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 
 import router from "./routes/index.js";
 import { requestLogger } from "./middlewares/requestLogger.js";
+import { env } from "./utils/env.js";
 
 const app = express();
 
@@ -28,7 +29,7 @@ printRoutes(app);
 export const handler = serverless(app);
 
 if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 3000;
+  const PORT = env('PORT') || 3000;
   app.listen(PORT, () => {
     console.log(`🚀 Express server running on http://localhost:${PORT}`);
   });

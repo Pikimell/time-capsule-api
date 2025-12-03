@@ -8,7 +8,8 @@ import {
 } from "amazon-cognito-identity-js";
 
 import { CLIENT_ID, USER_POOL_ID } from "../helpers/constants.js";
-import { createUser } from "./userService.js";
+import { createUser, getUserByCognito } from "./userService.js";
+import { User } from "../database/models/user.js";
 
 const poolData = {
   UserPoolId: USER_POOL_ID,
@@ -36,12 +37,15 @@ export type AuthSession = {
   accessToken: string;
   idToken: string;
   refreshToken: string;
+  user?: User;
 };
 
 type RegisterPayload = {
   email: string;
   password: string;
   group?: string;
+  name?: string;
+  avatar?: string;
 };
 
 type LoginPayload = {
@@ -63,6 +67,7 @@ type ConfirmEmailPayload = {
 export const registerUserService = async ({
   email,
   password,
+  name, avatar,
   group,
 }: RegisterPayload) => {
   return new Promise<{ message: string; userSub: string }>((resolve, reject) => {
@@ -92,6 +97,8 @@ export const registerUserService = async ({
             await createUser({
               nickname: email,
               password,
+              name: name,
+              avatar: avatar,
               cognitoSub: userSub,
             });
             resolve({ message: "User registered and added to group", userSub });
@@ -111,10 +118,31 @@ export const loginService = async ({ email, password }: LoginPayload): Promise<A
   return new Promise<AuthSession>((resolve, reject) => {
     getCognitoUser(email).authenticateUser(getAuthDetails(email, password), {
       onSuccess: (result) => {
-        resolve({
-          accessToken: result.getAccessToken().getJwtToken(),
-          idToken: result.getIdToken().getJwtToken(),
-          refreshToken: result.getRefreshToken().getToken(),
+        const buildSession = async () => {
+          const idPayload = result.getIdToken().decodePayload?.() ?? {};
+          const cognitoSub = (idPayload as { sub?: string }).sub;
+
+          let user: User | undefined;
+          if (cognitoSub) {
+            try {
+              const dbUser = await getUserByCognito(cognitoSub);
+              user = dbUser.toJSON();
+            } catch {
+              user = undefined;
+            }
+          }
+
+          resolve({
+            accessToken: result.getAccessToken().getJwtToken(),
+            idToken: result.getIdToken().getJwtToken(),
+            refreshToken: result.getRefreshToken().getToken(),
+            user,
+          });
+        };
+
+        buildSession().catch((err) => {
+          console.log("Login Service error", err);
+          reject(err);
         });
       },
       onFailure: (err) => {

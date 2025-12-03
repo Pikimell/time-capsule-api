@@ -6,15 +6,17 @@ import { ONE_DAY, ONE_MONTH } from "../helpers/constants.js";
 
 export const registerUserController: RequestHandler = async (req, res, next) => {
   try {
-    const { email, password, group } = req.body as {
+    const { name, avatar, email, password, group } = req.body as {
       email: string;
       password: string;
+      name?:string, avatar?:string,
       group?: string;
     };
 
     const result = await authServices.registerUserService({
       email,
       password,
+      name, avatar,
       group,
     });
 
@@ -51,7 +53,7 @@ export const loginController: RequestHandler = async (req, res, next) => {
       maxAge: ONE_DAY,
     });
 
-    res.status(200).json({ accessToken: session.accessToken });
+    res.status(200).json({ accessToken: session.accessToken, user: session.user });
   } catch (err) {
     next(err);
   }
@@ -96,7 +98,7 @@ export const refreshController: RequestHandler = async (_req, res, next) => {
       maxAge: ONE_DAY,
     });
 
-    res.status(200).json({ accessToken: session.accessToken });
+    res.status(200).json({ accessToken: session.accessToken, user: session.user });
   } catch (err) {
     next(err);
   }
