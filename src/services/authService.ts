@@ -78,6 +78,16 @@ export const registerUserService = async ({
       }),
     ];
 
+    const createDbUser = async (userSub: string) => {
+      await createUser({
+        nickname: email,
+        password,
+        name: name,
+        avatar: avatar,
+        cognitoSub: userSub,
+      });
+    };
+
     userPool.signUp(email, password, attributeList, [], (err, result) => {
       if (err || !result?.userSub) {
         return reject(err ?? new Error("Failed to register user"));
@@ -94,13 +104,7 @@ export const registerUserService = async ({
           })
           .promise()
           .then(async () => {
-            await createUser({
-              nickname: email,
-              password,
-              name: name,
-              avatar: avatar,
-              cognitoSub: userSub,
-            });
+            await createDbUser(userSub);
             resolve({ message: "User registered and added to group", userSub });
           })
           .catch((groupError) => {
@@ -108,7 +112,9 @@ export const registerUserService = async ({
             reject(groupError);
           });
       } else {
-        resolve({ message: "User registered successfully", userSub });
+        createDbUser(userSub)
+          .then(() => resolve({ message: "User registered successfully", userSub }))
+          .catch(reject);
       }
     });
   });
@@ -121,6 +127,7 @@ export const loginService = async ({ email, password }: LoginPayload): Promise<A
         const buildSession = async () => {
           const idPayload = result.getIdToken().decodePayload?.() ?? {};
           const cognitoSub = (idPayload as { sub?: string }).sub;
+          const emailFromToken = (idPayload as { email?: string }).email ?? email;
 
           let user: User | undefined;
           if (cognitoSub) {
@@ -128,7 +135,17 @@ export const loginService = async ({ email, password }: LoginPayload): Promise<A
               const dbUser = await getUserByCognito(cognitoSub);
               user = dbUser.toJSON();
             } catch {
-              user = undefined;
+              try {
+                const createdUser = await createUser({
+                  nickname: emailFromToken,
+                  password,
+                  cognitoSub,
+                });
+                user = createdUser.toJSON();
+              } catch (createErr) {
+                console.log("Failed to create user record on login", createErr);
+                user = undefined;
+              }
             }
           }
 
@@ -182,14 +199,27 @@ export const refreshService = async (): Promise<AuthSession> => {
 
       currentUser.refreshSession(
         session.getRefreshToken(),
-        (refreshErr: Error | null, newSession: CognitoUserSession | null) => {
+        async (refreshErr: Error | null, newSession: CognitoUserSession | null) => {
           if (refreshErr || !newSession) {
             return reject(refreshErr ?? new Error("Failed to refresh session"));
+          }
+          const idPayload = newSession.getIdToken().decodePayload?.() ?? {};
+          const cognitoSub = (idPayload as { sub?: string }).sub;
+          let user: User | undefined;
+
+          if (cognitoSub) {
+            try {
+              const dbUser = await getUserByCognito(cognitoSub);
+              user = dbUser.toJSON();
+            } catch {
+              user = undefined;
+            }
           }
           resolve({
             accessToken: newSession.getAccessToken().getJwtToken(),
             idToken: newSession.getIdToken().getJwtToken(),
             refreshToken: newSession.getRefreshToken().getToken(),
+            user,
           });
         }
       );

@@ -1,4 +1,5 @@
 import { RequestHandler } from "express";
+import createHttpError from "http-errors";
 
 
 import * as authServices from "../services/authService.js";
@@ -133,6 +134,18 @@ export const confirmEmailController: RequestHandler = async (req, res, next) => 
     const { email, code } = req.body as { email: string; code: string };
     await authServices.confirmEmailService({ email, code });
     res.status(200).json({ message: "Email confirmed successfully!" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMeController: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      throw createHttpError(401, "Unauthorized");
+    }
+
+    res.status(200).json(req.user.toJSON());
   } catch (err) {
     next(err);
   }

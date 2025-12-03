@@ -26,6 +26,11 @@ const userSchema = new Schema(
       type: String,
       required: true,
     },
+    awards: {
+      type: [String],
+      required: false,
+      default: []
+    }
   },
   {
     versionKey: false,

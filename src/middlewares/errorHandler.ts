@@ -6,12 +6,13 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   const status = isHttp
     ? err.statusCode || err.status || 500
     : 500;
-  const message = isHttp ? err.message : "Something went wrong";
-  const data = isHttp ? err : { message: err instanceof Error ? err.message : "Unexpected error" };
+  const message = isHttp ? err.message : err instanceof Error ? err.message : "Something went wrong";
+  const data = isHttp ? err : { message };
 
   res.status(status).json({
     status,
     message,
+    error: message,
     data,
   });
 };

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as authControllers from "../controllers/authController.js";
+import { authenticate } from "../middlewares/authenticate.js";
 
 const router = Router();
 
@@ -16,5 +17,7 @@ router.post("/reset/request", authControllers.requestResetEmailController);
 router.post("/reset/confirm", authControllers.resetPasswordController);
 
 router.post("/confirm", authControllers.confirmEmailController);
+
+router.get("/me", authenticate, authControllers.getMeController);
 
 export default router;

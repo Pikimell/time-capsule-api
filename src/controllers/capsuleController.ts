@@ -104,8 +104,12 @@ export const createCapsuleController: RequestHandler = async (req, res, next) =>
     const payload = req.body as CapsulePayload;
     const result = await createCapsule(payload);
 
+    console.log(result);
+    
     res.status(201).json(result);
   } catch (err) {
+    console.log(err);
+    
     next(err);
   }
 };

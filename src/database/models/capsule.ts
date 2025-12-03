@@ -28,6 +28,11 @@ const capsuleSchema = new Schema(
       type: Date,
       required: true,
     },
+    title: {
+      type: String,
+      default: "",
+      required: true,
+    },
     message: {
       type: String,
       default: "",

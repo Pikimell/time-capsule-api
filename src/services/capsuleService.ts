@@ -6,7 +6,7 @@ import { calculatePaginationData } from "../utils/calculatePaginationData.js";
 
 export type CapsulePayload = Pick<
   Capsule,
-  "userId" | "location" | "timeToOpen" | "message" | "media" | "files"
+  "userId" | "location" | "timeToOpen" | "title" | "message" | "media" | "files"
 >;
 
 export type CapsuleQueryFilters = Partial<Pick<Capsule, "userId">> & {
