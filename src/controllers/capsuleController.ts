@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import createHttpError from "http-errors";
 
 import {
   createCapsule,
@@ -101,15 +102,17 @@ export const getCapsuleByIdController: RequestHandler = async (req, res, next) =
 
 export const createCapsuleController: RequestHandler = async (req, res, next) => {
   try {
-    const payload = req.body as CapsulePayload;
-    const result = await createCapsule(payload);
+    if (!req.user) {
+      throw createHttpError(401, "Unauthorized");
+    }
 
-    console.log(result);
-    
+    const payload = {
+      ...(req.body as CapsulePayload),
+      userId: req.user.id,
+    };
+    const result = await createCapsule(payload);
     res.status(201).json(result);
   } catch (err) {
-    console.log(err);
-    
     next(err);
   }
 };

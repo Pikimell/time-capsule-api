@@ -1,43 +1,25 @@
-import AWS from "aws-sdk";
+import createHttpError from "http-errors";
+
+import { SessionCollection } from "../database/models/session.js";
+import { User, UserCollection } from "../database/models/user.js";
 import {
-  AuthenticationDetails,
-  CognitoUser,
-  CognitoUserAttribute,
-  CognitoUserPool,
-  CognitoUserSession,
-} from "amazon-cognito-identity-js";
-
-import { CLIENT_ID, USER_POOL_ID } from "../helpers/constants.js";
-import { createUser, getUserByCognito } from "./userService.js";
-import { User } from "../database/models/user.js";
-
-const poolData = {
-  UserPoolId: USER_POOL_ID,
-  ClientId: CLIENT_ID,
-};
-
-const userPool = new CognitoUserPool(poolData);
-const cognito = new AWS.CognitoIdentityServiceProvider();
-
-const getCognitoUser = (email: string) => {
-  return new CognitoUser({
-    Username: email,
-    Pool: userPool,
-  });
-};
-
-const getAuthDetails = (email: string, password: string) => {
-  return new AuthenticationDetails({
-    Username: email,
-    Password: password,
-  });
-};
+  ACCESS_TOKEN_SECRET,
+  ONE_DAY,
+  ONE_MONTH,
+  REFRESH_TOKEN_SECRET,
+} from "../helpers/constants.js";
+import {
+  createUser,
+  getUserByEmail,
+  getUserById,
+  isPasswordValid,
+} from "./userService.js";
+import { signJwt, verifyJwt } from "../utils/jwt.js";
 
 export type AuthSession = {
   accessToken: string;
-  idToken: string;
   refreshToken: string;
-  user?: User;
+  user: Omit<User, "password">;
 };
 
 type RegisterPayload = {
@@ -53,240 +35,133 @@ type LoginPayload = {
   password: string;
 };
 
-type ResetPasswordPayload = {
-  email: string;
-  code: string;
-  newPassword: string;
-};
+const createTokens = (userId: string) => ({
+  accessToken: signJwt({
+    sub: userId,
+    type: "access",
+    secret: ACCESS_TOKEN_SECRET,
+    expiresInMs: ONE_DAY,
+  }),
+  refreshToken: signJwt({
+    sub: userId,
+    type: "refresh",
+    secret: REFRESH_TOKEN_SECRET,
+    expiresInMs: ONE_MONTH,
+  }),
+});
 
-type ConfirmEmailPayload = {
-  email: string;
-  code: string;
+const buildSession = async (userId: string): Promise<AuthSession> => {
+  const user = await getUserById(userId);
+  const { accessToken, refreshToken } = createTokens(user.id);
+
+  await SessionCollection.deleteMany({ userId: user._id });
+  await SessionCollection.create({
+    userId: user._id,
+    accessToken,
+    refreshToken,
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+    user: user.toJSON(),
+  };
 };
 
 export const registerUserService = async ({
   email,
   password,
-  name, avatar,
-  group,
+  name,
+  avatar,
 }: RegisterPayload) => {
-  return new Promise<{ message: string; userSub: string }>((resolve, reject) => {
-    const attributeList = [
-      new CognitoUserAttribute({
-        Name: "email",
-        Value: email,
-      }),
-    ];
+  const normalizedEmail = email.trim().toLowerCase();
+  const existingUser = await UserCollection.findOne({ email: normalizedEmail });
 
-    const createDbUser = async (userSub: string) => {
-      await createUser({
-        nickname: email,
-        password,
-        name: name,
-        avatar: avatar,
-        cognitoSub: userSub,
-      });
-    };
+  if (existingUser) {
+    throw createHttpError(409, "User with this email already exists");
+  }
 
-    userPool.signUp(email, password, attributeList, [], (err, result) => {
-      if (err || !result?.userSub) {
-        return reject(err ?? new Error("Failed to register user"));
-      }
-
-      const userSub = result.userSub;
-
-      if (group) {
-        cognito
-          .adminAddUserToGroup({
-            UserPoolId: USER_POOL_ID,
-            Username: email,
-            GroupName: group,
-          })
-          .promise()
-          .then(async () => {
-            await createDbUser(userSub);
-            resolve({ message: "User registered and added to group", userSub });
-          })
-          .catch((groupError) => {
-            console.error("Помилка додавання до групи:", groupError);
-            reject(groupError);
-          });
-      } else {
-        createDbUser(userSub)
-          .then(() => resolve({ message: "User registered successfully", userSub }))
-          .catch(reject);
-      }
-    });
+  const nextUser = await createUser({
+    email: normalizedEmail,
+    password,
+    name,
+    avatar,
+    nickname: normalizedEmail,
+    awards: [],
   });
+
+  return {
+    message: "User registered successfully",
+    userId: nextUser.id,
+  };
 };
 
 export const loginService = async ({ email, password }: LoginPayload): Promise<AuthSession> => {
-  return new Promise<AuthSession>((resolve, reject) => {
-    getCognitoUser(email).authenticateUser(getAuthDetails(email, password), {
-      onSuccess: (result) => {
-        const buildSession = async () => {
-          const idPayload = result.getIdToken().decodePayload?.() ?? {};
-          const cognitoSub = (idPayload as { sub?: string }).sub;
-          const emailFromToken = (idPayload as { email?: string }).email ?? email;
+  const user = await getUserByEmail(email);
+  const isValid = isPasswordValid(password, user.password);
 
-          let user: User | undefined;
-          if (cognitoSub) {
-            try {
-              const dbUser = await getUserByCognito(cognitoSub);
-              user = dbUser.toJSON();
-            } catch {
-              try {
-                const createdUser = await createUser({
-                  nickname: emailFromToken,
-                  password,
-                  cognitoSub,
-                });
-                user = createdUser.toJSON();
-              } catch (createErr) {
-                console.log("Failed to create user record on login", createErr);
-                user = undefined;
-              }
-            }
-          }
-
-          resolve({
-            accessToken: result.getAccessToken().getJwtToken(),
-            idToken: result.getIdToken().getJwtToken(),
-            refreshToken: result.getRefreshToken().getToken(),
-            user,
-          });
-        };
-
-        buildSession().catch((err) => {
-          console.log("Login Service error", err);
-          reject(err);
-        });
-      },
-      onFailure: (err) => {
-        console.log("Login Service error", err);
-        reject(err);
-      },
-    });
-  });
-};
-
-export const logoutService = async () => {
-  return new Promise<{ message: string }>((resolve, reject) => {
-    try {
-      const currentUser = userPool.getCurrentUser();
-      if (!currentUser) {
-        return resolve({ message: "User already logged out" });
-      }
-      currentUser.signOut();
-      resolve({ message: "Logged out successfully" });
-    } catch (err) {
-      reject(err);
-    }
-  });
-};
-
-export const refreshService = async (): Promise<AuthSession> => {
-  return new Promise<AuthSession>((resolve, reject) => {
-    const currentUser = userPool.getCurrentUser();
-    if (!currentUser) {
-      return reject(new Error("No user logged in"));
-    }
-
-    currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
-      if (err || !session?.isValid()) {
-        return reject(new Error("Session is invalid or expired"));
-      }
-
-      currentUser.refreshSession(
-        session.getRefreshToken(),
-        async (refreshErr: Error | null, newSession: CognitoUserSession | null) => {
-          if (refreshErr || !newSession) {
-            return reject(refreshErr ?? new Error("Failed to refresh session"));
-          }
-          const idPayload = newSession.getIdToken().decodePayload?.() ?? {};
-          const cognitoSub = (idPayload as { sub?: string }).sub;
-          let user: User | undefined;
-
-          if (cognitoSub) {
-            try {
-              const dbUser = await getUserByCognito(cognitoSub);
-              user = dbUser.toJSON();
-            } catch {
-              user = undefined;
-            }
-          }
-          resolve({
-            accessToken: newSession.getAccessToken().getJwtToken(),
-            idToken: newSession.getIdToken().getJwtToken(),
-            refreshToken: newSession.getRefreshToken().getToken(),
-            user,
-          });
-        }
-      );
-    });
-  });
-};
-
-export const requestResetEmailService = async (email: string) => {
-  return new Promise<{ message: string }>((resolve, reject) => {
-    const cognitoUser = getCognitoUser(email);
-    cognitoUser.forgotPassword({
-      onSuccess: () => resolve({ message: "Password reset email sent" }),
-      onFailure: (err) => reject(err),
-    });
-  });
-};
-
-export const resetPasswordService = async ({ email, code, newPassword }: ResetPasswordPayload) => {
-  return new Promise<{ message: string }>((resolve, reject) => {
-    const cognitoUser = getCognitoUser(email);
-    cognitoUser.confirmPassword(code, newPassword, {
-      onSuccess: () => resolve({ message: "Password successfully reset" }),
-      onFailure: (err) => reject(err),
-    });
-  });
-};
-
-export const confirmEmailService = async ({ email, code }: ConfirmEmailPayload) => {
-  return new Promise<{ message: string; result: string | undefined }>((resolve, reject) => {
-    const cognitoUser = getCognitoUser(email);
-    cognitoUser.confirmRegistration(code, true, (err, result) => {
-      if (err) {
-        return reject(err);
-      }
-      resolve({ message: "Email successfully confirmed", result });
-    });
-  });
-};
-
-export const disableUserService = async (email: string) => {
-  try {
-    await cognito
-      .adminDisableUser({
-        UserPoolId: USER_POOL_ID,
-        Username: email,
-      })
-      .promise();
-
-    return { message: "User has been disabled successfully" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new Error(`Failed to disable user: ${message}`);
+  if (!isValid) {
+    throw createHttpError(401, "Email or password is incorrect");
   }
+
+  return buildSession(user.id);
 };
 
-export const enableUserService = async (email: string) => {
-  try {
-    await cognito
-      .adminEnableUser({
-        UserPoolId: USER_POOL_ID,
-        Username: email,
-      })
-      .promise();
-
-    return { message: "User has been enabled successfully" };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    throw new Error(`Failed to enable user: ${message}`);
+export const logoutService = async ({
+  refreshToken,
+  accessToken,
+}: {
+  refreshToken?: string;
+  accessToken?: string;
+}) => {
+  if (!refreshToken && !accessToken) {
+    return { message: "User already logged out" };
   }
+
+  await SessionCollection.deleteMany({
+    $or: [
+      ...(refreshToken ? [{ refreshToken }] : []),
+      ...(accessToken ? [{ accessToken }] : []),
+    ],
+  });
+
+  return { message: "Logged out successfully" };
+};
+
+export const refreshService = async (refreshToken: string): Promise<AuthSession> => {
+  const payload = verifyJwt({
+    token: refreshToken,
+    secret: REFRESH_TOKEN_SECRET,
+    expectedType: "refresh",
+  });
+
+  const session = await SessionCollection.findOne({
+    refreshToken,
+    userId: payload.sub,
+  });
+
+  if (!session) {
+    throw createHttpError(401, "Session not found");
+  }
+
+  return buildSession(payload.sub);
+};
+
+export const getUserFromAccessToken = async (accessToken: string) => {
+  const payload = verifyJwt({
+    token: accessToken,
+    secret: ACCESS_TOKEN_SECRET,
+    expectedType: "access",
+  });
+
+  const session = await SessionCollection.findOne({
+    accessToken,
+    userId: payload.sub,
+  });
+
+  if (!session) {
+    throw createHttpError(401, "Session not found");
+  }
+
+  return getUserById(payload.sub);
 };

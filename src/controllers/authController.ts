@@ -1,16 +1,31 @@
-import { RequestHandler } from "express";
+import { Request, RequestHandler } from "express";
 import createHttpError from "http-errors";
-
 
 import * as authServices from "../services/authService.js";
 import { ONE_DAY, ONE_MONTH } from "../helpers/constants.js";
+
+const isLocalhostRequest = (req: Request) => {
+  const host = req.header("host") ?? "";
+  const origin = req.header("origin") ?? "";
+  const referer = req.header("referer") ?? "";
+  return /localhost/i.test(host) || /localhost/i.test(origin) || /localhost/i.test(referer);
+};
+
+const makeCookieOptions = (req: Request, maxAge: number) => ({
+  httpOnly: true,
+  secure: !isLocalhostRequest(req),
+  sameSite: isLocalhostRequest(req) ? ("lax" as const) : ("none" as const),
+  path: "/",
+  maxAge,
+});
 
 export const registerUserController: RequestHandler = async (req, res, next) => {
   try {
     const { name, avatar, email, password, group } = req.body as {
       email: string;
       password: string;
-      name?:string, avatar?:string,
+      name?: string;
+      avatar?: string;
       group?: string;
     };
 
@@ -33,26 +48,9 @@ export const loginController: RequestHandler = async (req, res, next) => {
 
     const session = await authServices.loginService({ email, password });
 
-    res.cookie("refreshToken", session.refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_MONTH,
-    });
+    res.cookie("refreshToken", session.refreshToken, makeCookieOptions(req, ONE_MONTH));
 
-    res.cookie("accessToken", session.accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_DAY,
-    });
-
-    res.cookie("sessionId", session.idToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_DAY,
-    });
+    res.cookie("accessToken", session.accessToken, makeCookieOptions(req, ONE_DAY));
 
     res.status(200).json({ accessToken: session.accessToken, user: session.user });
   } catch (err) {
@@ -60,13 +58,15 @@ export const loginController: RequestHandler = async (req, res, next) => {
   }
 };
 
-export const logoutController: RequestHandler = async (_req, res, next) => {
+export const logoutController: RequestHandler = async (req, res, next) => {
   try {
-    await authServices.logoutService();
+    await authServices.logoutService({
+      refreshToken: req.cookies.refreshToken,
+      accessToken: req.cookies.accessToken,
+    });
 
-    res.clearCookie("refreshToken");
-    res.clearCookie("accessToken");
-    res.clearCookie("sessionId");
+    res.clearCookie("refreshToken", makeCookieOptions(req, 0));
+    res.clearCookie("accessToken", makeCookieOptions(req, 0));
 
     res.status(200).json({ message: "Logged out successfully!" });
   } catch (err) {
@@ -74,66 +74,21 @@ export const logoutController: RequestHandler = async (_req, res, next) => {
   }
 };
 
-export const refreshController: RequestHandler = async (_req, res, next) => {
+export const refreshController: RequestHandler = async (req, res, next) => {
   try {
-    const session = await authServices.refreshService();
+    const refreshToken = req.cookies.refreshToken as string | undefined;
 
-    res.cookie("refreshToken", session.refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_MONTH,
-    });
+    if (!refreshToken) {
+      throw createHttpError(401, "Refresh token is required");
+    }
 
-    res.cookie("accessToken", session.accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_DAY,
-    });
+    const session = await authServices.refreshService(refreshToken);
 
-    res.cookie("sessionId", session.idToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: ONE_DAY,
-    });
+    res.cookie("refreshToken", session.refreshToken, makeCookieOptions(req, ONE_MONTH));
+
+    res.cookie("accessToken", session.accessToken, makeCookieOptions(req, ONE_DAY));
 
     res.status(200).json({ accessToken: session.accessToken, user: session.user });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const requestResetEmailController: RequestHandler = async (req, res, next) => {
-  try {
-    const { email } = req.body as { email: string };
-    await authServices.requestResetEmailService(email);
-    res.status(200).json({ message: "Password reset email sent" });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const resetPasswordController: RequestHandler = async (req, res, next) => {
-  try {
-    const { email, code, newPassword } = req.body as {
-      email: string;
-      code: string;
-      newPassword: string;
-    };
-    await authServices.resetPasswordService({ email, code, newPassword });
-    res.status(200).json({ message: "Password successfully reset" });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const confirmEmailController: RequestHandler = async (req, res, next) => {
-  try {
-    const { email, code } = req.body as { email: string; code: string };
-    await authServices.confirmEmailService({ email, code });
-    res.status(200).json({ message: "Email confirmed successfully!" });
   } catch (err) {
     next(err);
   }

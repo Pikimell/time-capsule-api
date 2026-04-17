@@ -2,10 +2,12 @@ import { HydratedDocument, InferSchemaType, model, Schema } from "mongoose";
 
 const userSchema = new Schema(
   {
-    cognitoSub: {
+    email: {
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      trim: true,
     },
     nickname: {
       type: String,

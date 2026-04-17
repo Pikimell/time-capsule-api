@@ -1,16 +1,7 @@
-import { CognitoJwtVerifier } from "aws-jwt-verify";
-import type { CognitoAccessTokenPayload } from "aws-jwt-verify/jwt-model";
 import createHttpError from "http-errors";
 import type { RequestHandler } from "express";
 
-import { CLIENT_ID, USER_POOL_ID } from "../helpers/constants.js";
-import { getUserByCognito } from "../services/userService.js";
-
-const verifier = CognitoJwtVerifier.create({
-  userPoolId: USER_POOL_ID,
-  tokenUse: "access",
-  clientId: CLIENT_ID,
-});
+import { getUserFromAccessToken } from "../services/authService.js";
 
 export const authenticate: RequestHandler = async (req, _res, next) => {
   try {
@@ -26,15 +17,13 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
       return next(createHttpError(401, "Auth header should be of type Bearer"));
     }
 
-    const payload = (await verifier.verify(token)) as CognitoAccessTokenPayload;
-    const user = await getUserByCognito(payload.sub);
+    const user = await getUserFromAccessToken(token);
 
     req.user = user;
-    req.typeAccount = payload["cognito:groups"]?.[0] ?? null;
+    req.typeAccount = null;
 
     next();
   } catch (err) {
-    console.error("JWT Verification error:", err);
     return next(createHttpError(401, "Invalid token"));
   }
 };
