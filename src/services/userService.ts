@@ -47,3 +47,39 @@ export const addAwardToUser = async (userId: string, awardId: string) => {
 
   return updatedUser;
 };
+
+export const updateUserProfile = async (
+  userId: string,
+  { nickname, name }: { nickname: string; name?: string }
+) => {
+  const normalizedNickname = nickname.trim();
+  const normalizedName = name?.trim() || "Noname";
+
+  if (!normalizedNickname) {
+    throw createHttpError(400, "Nickname is required");
+  }
+
+  const existingUser = await UserCollection.findOne({
+    nickname: normalizedNickname,
+    _id: { $ne: userId },
+  });
+
+  if (existingUser) {
+    throw createHttpError(409, "Nickname is already taken");
+  }
+
+  const updatedUser = await UserCollection.findByIdAndUpdate(
+    userId,
+    {
+      nickname: normalizedNickname,
+      name: normalizedName,
+    },
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedUser) {
+    throw createHttpError(404, "User not found");
+  }
+
+  return updatedUser;
+};
