@@ -25,14 +25,7 @@ export type CapsuleQueryOptions = CapsuleQueryFilters & {
   sort?: Record<string, 1 | -1>;
 };
 
-export const getCapsules = async ({
-  page = 1,
-  perPage = 10,
-  sort = { createdAt: -1 },
-  ...filters
-}: CapsuleQueryOptions) => {
-  const offset = (page - 1) * perPage;
-
+const buildCapsuleQuery = (filters: CapsuleQueryFilters) => {
   const query: FilterQuery<Capsule> = {};
 
   if (filters.userId) {
@@ -59,7 +52,11 @@ export const getCapsules = async ({
     }
   }
 
-  const basePipeline: PipelineStage[] = [{ $match: query }];
+  return query;
+};
+
+const buildCapsuleBasePipeline = (filters: CapsuleQueryFilters) => {
+  const basePipeline: PipelineStage[] = [{ $match: buildCapsuleQuery(filters) }];
 
   const shouldFilterByDistance =
     typeof filters.lat === "number" &&
@@ -116,6 +113,18 @@ export const getCapsules = async ({
     );
   }
 
+  return basePipeline;
+};
+
+export const getCapsules = async ({
+  page = 1,
+  perPage = 10,
+  sort = { createdAt: -1 },
+  ...filters
+}: CapsuleQueryOptions) => {
+  const offset = (page - 1) * perPage;
+  const basePipeline = buildCapsuleBasePipeline(filters);
+
   const totalResult = await CapsuleCollection.aggregate([
     ...basePipeline,
     { $count: "count" },
@@ -127,6 +136,47 @@ export const getCapsules = async ({
     { $sort: sort },
     { $skip: offset },
     { $limit: perPage },
+  ]);
+
+  const paginationInfo = calculatePaginationData(totalCapsules, page, perPage);
+
+  return {
+    ...paginationInfo,
+    capsules,
+  };
+};
+
+export const getPublicCapsules = async ({
+  page = 1,
+  perPage = 10,
+  sort = { createdAt: -1 },
+  ...filters
+}: CapsuleQueryOptions) => {
+  const offset = (page - 1) * perPage;
+  const basePipeline = buildCapsuleBasePipeline(filters);
+
+  const totalResult = await CapsuleCollection.aggregate([
+    ...basePipeline,
+    { $count: "count" },
+  ]);
+  const totalCapsules = totalResult[0]?.count ?? 0;
+
+  const capsules = await CapsuleCollection.aggregate([
+    ...basePipeline,
+    { $sort: sort },
+    { $skip: offset },
+    { $limit: perPage },
+    {
+      $project: {
+        _id: 1,
+        location: 1,
+        timeToOpen: 1,
+        title: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        distance: 1,
+      },
+    },
   ]);
 
   const paginationInfo = calculatePaginationData(totalCapsules, page, perPage);

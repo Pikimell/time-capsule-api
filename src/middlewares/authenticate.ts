@@ -27,3 +27,28 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
     return next(createHttpError(401, "Invalid token"));
   }
 };
+
+export const optionalAuthenticate: RequestHandler = async (req, _res, next) => {
+  try {
+    const authHeader = req.headers["authorization"];
+
+    if (!authHeader) {
+      return next();
+    }
+
+    const [bearer, token] = authHeader.split(" ");
+
+    if (bearer !== "Bearer" || !token) {
+      return next();
+    }
+
+    const user = await getUserFromAccessToken(token);
+
+    req.user = user;
+    req.typeAccount = null;
+
+    return next();
+  } catch {
+    return next();
+  }
+};

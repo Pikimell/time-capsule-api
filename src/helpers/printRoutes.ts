@@ -7,7 +7,7 @@ type RouteLayer = {
   regexp?: RegExp;
 };
 
-export function printRoutes(app: Application, server = "http://localhost:3000") {
+export function printRoutes(app: Application, server = "http://localhost:3001") {
   const stack: RouteLayer[] | undefined = (app as unknown as { _router?: { stack?: RouteLayer[] } })._router?.stack;
   if (!stack?.length) {
     return;

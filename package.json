@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "description": "Aws Node Express Template",
   "scripts": {
-    "dev": "nodemon --watch src --ext ts --exec \"ts-node --esm\" src/index.ts",
+    "dev": "nodemon --watch src --ext ts --exec \"npm run build && node dist/index.js\"",
     "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "npm run build && node dist/index.js",
     "push": "git add . && git commit -m 'update' && git push",
     "deploy": "npm run build && sls deploy"
@@ -29,6 +31,7 @@
     "@types/node": "^22.7.4",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.6"
   }
 }

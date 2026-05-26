@@ -70,6 +70,11 @@ Response 200:
 - files: string[]
 
 ### GET /capsules
+Headers:
+- Authorization: Bearer <accessToken>
+
+Повертає повну інформацію тільки про капсули поточного користувача.
+
 Query (усі необов'язкові):
 - page: number (default 1)
 - perPage: number (default 10)
@@ -92,6 +97,20 @@ Response 200:
 - hasNextPage: boolean
 - hasPreviousPage: boolean
 - capsules: Capsule[]
+
+### GET /capsules/public
+Публічний endpoint без авторизації. Повертає тільки стислу інформацію, без `message`, `media`, `files` та `userId`.
+
+Query: як у `GET /capsules`
+
+Response 200:
+- page: number
+- perPage: number
+- totalPages: number
+- totalItems: number
+- hasNextPage: boolean
+- hasPreviousPage: boolean
+- capsules: PublicCapsule[]
 
 ### GET /capsules/:capsuleId
 Response 200:

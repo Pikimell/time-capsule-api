@@ -6,6 +6,7 @@ import {
   deleteCapsule,
   getCapsuleById,
   getCapsules,
+  getPublicCapsules,
   type CapsulePayload,
   updateCapsule,
 } from "../services/capsuleService.js";
@@ -52,12 +53,59 @@ const parseDate = (value: unknown): Date | undefined => {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 };
 
+const allowedSortFields = new Set(["createdAt", "updatedAt", "timeToOpen", "title", "distance"]);
+
+const parseSortField = (value: unknown) => {
+  const sortField = parseString(value) || "createdAt";
+  return allowedSortFields.has(sortField) ? sortField : "createdAt";
+};
+
 export const getCapsulesController: RequestHandler = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      throw createHttpError(401, "Unauthorized");
+    }
+
+    const page = parseNumber(req.query.page, 1);
+    const perPage = parseNumber(req.query.perPage, 10);
+
+    const sortField = parseSortField(req.query.sortField);
+    const sortOrder = parseString(req.query.sortOrder) === "asc" ? 1 : -1;
+
+    const availableAfter = parseDate(req.query.availableAfter);
+    const availableBefore = parseDate(req.query.availableBefore);
+    const country = parseString(req.query.country);
+    const city = parseString(req.query.city);
+    const lat = parseCoordinate(req.query.lat);
+    const lon = parseCoordinate(req.query.lon);
+    const distance = parsePositiveNumber(req.query.distance);
+
+    const result = await getCapsules({
+      page,
+      perPage,
+      sort: { [sortField]: sortOrder as 1 | -1 },
+      userId: req.user.id,
+      ...(country ? { country } : {}),
+      ...(city ? { city } : {}),
+      ...(availableAfter ? { availableAfter } : {}),
+      ...(availableBefore ? { availableBefore } : {}),
+      ...(typeof lat === "number" ? { lat } : {}),
+      ...(typeof lon === "number" ? { lon } : {}),
+      ...(typeof distance === "number" ? { distance } : {}),
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getPublicCapsulesController: RequestHandler = async (req, res, next) => {
   try {
     const page = parseNumber(req.query.page, 1);
     const perPage = parseNumber(req.query.perPage, 10);
 
-    const sortField = parseString(req.query.sortField) || "createdAt";
+    const sortField = parseSortField(req.query.sortField);
     const sortOrder = parseString(req.query.sortOrder) === "asc" ? 1 : -1;
 
     const availableAfter = parseDate(req.query.availableAfter);
@@ -69,7 +117,7 @@ export const getCapsulesController: RequestHandler = async (req, res, next) => {
     const lon = parseCoordinate(req.query.lon);
     const distance = parsePositiveNumber(req.query.distance);
 
-    const result = await getCapsules({
+    const result = await getPublicCapsules({
       page,
       perPage,
       sort: { [sortField]: sortOrder as 1 | -1 },
@@ -93,6 +141,12 @@ export const getCapsuleByIdController: RequestHandler = async (req, res, next) =
   try {
     const capsuleId = req.params.capsuleId;
     const result = await getCapsuleById(capsuleId);
+    const isOpen = new Date(result.timeToOpen).getTime() <= Date.now();
+    const isOwner = Boolean(req.user && result.userId === req.user.id);
+
+    if (!isOpen && !isOwner) {
+      throw createHttpError(403, "Capsule is not open yet");
+    }
 
     res.status(200).json(result);
   } catch (err) {
