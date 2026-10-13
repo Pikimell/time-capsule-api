@@ -1,85 +1,83 @@
-<!--
-title: 'Serverless Framework Node Express API on AWS'
-description: 'This template demonstrates how to develop and deploy a simple Node Express API running on AWS Lambda using the Serverless Framework.'
-layout: Doc
-framework: v4
-platform: AWS
-language: nodeJS
-priority: 1
-authorLink: 'https://github.com/serverless'
-authorName: 'Serverless, Inc.'
-authorAvatar: 'https://avatars1.githubusercontent.com/u/13742415?s=200&v=4'
--->
+# Time Capsule API
 
-# Serverless Framework Node Express API on AWS
+> REST API for geo-tagged digital time capsules: write a message today, pin it to a place on the map, and unlock it on a chosen date.
 
-This template demonstrates how to develop and deploy a simple Node Express API service running on AWS Lambda using the Serverless Framework.
+![Node.js](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)
+![AWS Lambda](https://img.shields.io/badge/AWS_Lambda-FF9900?logo=awslambda&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white)
 
-This template configures a single function, `api`, which is responsible for handling all incoming requests using the `httpApi` event. To learn more about `httpApi` event configuration options, please refer to [httpApi event docs](https://www.serverless.com/framework/docs/providers/aws/events/http-api/). As the event is configured in a way to accept all incoming requests, the Express.js framework is responsible for routing and handling requests internally. This implementation uses the `serverless-http` package to transform the incoming event request payloads to payloads compatible with Express.js. To learn more about `serverless-http`, please refer to the [serverless-http README](https://github.com/dougmoscrop/serverless-http).
+## Overview
 
-## Usage
+Users create capsules with a title, message, media, and files, attach them to a location (lat/lon, country, city), and set an opening date. Anyone exploring the map can see where capsules are hidden, but the content stays locked until the opening date; the owner can read their own capsules at any time.
 
-### Deployment
+The API is consumed by a Next.js frontend with Google Maps and runs on AWS Lambda.
 
-Install dependencies with:
+## Features
 
-```
-npm install
-```
+- **Authentication:** register, login, logout, refresh, and `GET /auth/me`.
+  - Access and refresh tokens in **httpOnly, secure cookies** plus a Bearer token for API clients.
+  - Passwords hashed with **scrypt** and a per-user salt; comparison via `timingSafeEqual`.
+- **Capsules:** CRUD for the owner, with filters by opening date, pagination, and sorting.
+- **Public map feed:** returns only metadata (location, title, opening date) and never the message or attachments.
+- **Geo search:** radius search by `lat`/`lon`/`distance`, with the great-circle distance computed in a MongoDB aggregation pipeline.
+- **Visibility rules:** `GET /capsules/:id` uses optional authentication. The owner always has access, and other users get `403` until `timeToOpen`.
+- **Users:** public profiles, profile updates, and achievements (`/users/:id/awards`).
+- **Tests:** unit tests for password hashing, cookie creation, and pagination with Vitest.
 
-and then deploy with:
+## Endpoints
 
-```
-serverless deploy
-```
+| Method | Path | Auth | Description |
+| :-- | :-- | :-- | :-- |
+| `POST` | `/auth/register` | — | Create an account |
+| `POST` | `/auth/login` | — | Log in, set session cookies |
+| `POST` | `/auth/refresh` | cookie | Rotate tokens |
+| `POST` | `/auth/logout` | cookie | Clear session |
+| `GET` | `/auth/me` | ✔ | Current user |
+| `GET` | `/capsules` | ✔ | Current user's capsules (paginated, filterable) |
+| `GET` | `/capsules/public` | — | Public map feed (metadata only, geo radius filter) |
+| `GET` | `/capsules/:id` | optional | Capsule content: owner anytime, others after the opening date |
+| `POST` | `/capsules` | ✔ | Create a capsule |
+| `PATCH` | `/capsules/:id` | ✔ | Update own capsule |
+| `DELETE` | `/capsules/:id` | ✔ | Delete own capsule |
+| `GET` | `/users/:id` | — | Public profile |
+| `PATCH` | `/users/:id` | ✔ | Update profile |
 
-After running deploy, you should see output similar to:
+Request and response details are in [DOCS.md](DOCS.md) (Ukrainian).
 
-```
-Deploying "aws-node-express-api" to stage "dev" (us-east-1)
-
-✔ Service deployed to stack aws-node-express-api-dev (96s)
-
-endpoint: ANY - https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com
-functions:
-  api: aws-node-express-api-dev-api (2.3 kB)
-```
-
-_Note_: In current form, after deployment, your API is public and can be invoked by anyone. For production deployments, you might want to configure an authorizer. For details on how to do that, refer to [`httpApi` event docs](https://www.serverless.com/framework/docs/providers/aws/events/http-api/).
-
-### Invocation
-
-After successful deployment, you can call the created application via HTTP:
+## Architecture
 
 ```
-curl https://xxxxxxx.execute-api.us-east-1.amazonaws.com/
+src/
+├── routes/        # /auth, /capsules, /users
+├── controllers/   # HTTP layer, wrapped by ctrlWrapper for async errors
+├── services/      # business logic, geo aggregation pipeline
+├── middlewares/   # authenticate / optionalAuthenticate, error handler, logger
+├── database/      # Mongoose models: User, Session, Capsule
+└── utils/         # jwt, password hashing, cookies, pagination (+ tests)
 ```
 
-Which should result in the following response:
+## Getting started
 
-```json
-{ "message": "Hello from root!" }
-```
+Requirements: Node.js 22 and MongoDB.
 
-### Local development
-
-The easiest way to develop and test your function is to use the `dev` command:
-
-```
-serverless dev
-```
-
-This will start a local emulator of AWS Lambda and tunnel your requests to and from AWS Lambda, allowing you to interact with your function as if it were running in the cloud.
-
-Now you can invoke the function as before, but this time the function will be executed locally. Now you can develop your function locally, invoke it, and see the results immediately without having to re-deploy.
-
-When you are done developing, don't forget to run `serverless deploy` to deploy the function to the cloud.
-
-### Setup AWS CLI
-
-In terminal paste this command:
 ```bash
-aws configure --profile yourProfileName
-export AWS_PROFILE = yourProfileName
-npm install serverless -g
+cp .env.example .env
+npm install
+npm run dev     # http://localhost:3001
+npm test        # Vitest
 ```
+
+| Variable | Description |
+| :-- | :-- |
+| `MONGODB_USER`, `MONGODB_PASSWORD`, `MONGODB_URL`, `MONGODB_DB` | MongoDB connection |
+| `PORT` | Local port (default `3001`) |
+| `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET` | JWT signing secrets |
+
+Deploy to AWS Lambda with `npm run deploy` (Serverless Framework, HTTP API).
+
+## Author
+
+**Volodymyr Pashchenko**, Full-stack Developer · [GitHub](https://github.com/Pikimell) · [LinkedIn](https://www.linkedin.com/in/pashchenko-v-r)
